@@ -2,6 +2,7 @@ import io, re
 from array import array
 from numbers import Number
 from collections import Sequence
+from gphoto2 import *
 
 class xray(array):  # simplified array that allows sparseness
 	def __new__(cls, typecode= 'f', initObj= ()):

@@ -69,7 +69,7 @@ def getCalibrationData(file_OR_filePath, interpolateNow= True):
 	stepArray= xray('f') # simplified array that allows sparseness
 	stepCounts= array('I', ( 0, 0, 0, 0 ))
 	
-	if hasattr(file_OR_filePath, "__iter__"):
+	if hasattr(file_OR_filePath, "__iter__") and not isinstance(file_OR_filePath, str) :
 		file= file_OR_filePath
 	else:
 		try:
@@ -89,7 +89,7 @@ def getCalibrationData(file_OR_filePath, interpolateNow= True):
 				currStepIndex= int(propertyMatch.group(1))
 				if currStepIndex > currStepCount :
 					stepCounts[currStepSize]= currStepCount= currStepIndex
-				if currStepSize==1 and currentIndex : # if stepIndex is 0, it's ignored
+				if currStepSize==1 and currStepIndex : # if stepIndex is 0, it's ignored
 					try:
 						currStepValue= float(propertyMatch.group(2)) # xfocus always uses centimeters internally
 					except:
@@ -154,9 +154,9 @@ def getCalibrationDataFile(filePathOrName= None):
 	return CameraFile(filePathOrName)
 
 
-#__inf= float("inf")
+# Discards repeating values, interpolating the data in-between as a hyperbolic curve
 def interpolateData(dataArray, startValue= None, maxValue= 0xFFFF):  # operates directly on number arrays
-	__inf= chr(0)  # always greater than any number
+	__inf= float("inf")
 	__nan= float("nan")
 	__negInf= float("-inf")
 	_dataArray= dataArray
@@ -191,14 +191,16 @@ def interpolateData(dataArray, startValue= None, maxValue= 0xFFFF):  # operates 
 			startValue= None  # if startValue wasn't a number it's determined by the data
 	if startValue is None or not startValue > __negInf :  # start value can NOT be -Infinity
 		startValue= __inf
+		started= False
 		for currIndex in range(0, dataLength):
 			currValue= dataArray[currIndex]
 			if currValue :
-				if currValue < startValue :
+				if currValue <= startValue :
 					startValue= currValue
-				elif currValue > startValue :
+					started= True
+				else :
 					break
-		if startValue==__inf :
+		if not started :
 			startValue= 0
 			
 	if maxValue is not None :
@@ -207,7 +209,7 @@ def interpolateData(dataArray, startValue= None, maxValue= 0xFFFF):  # operates 
 		except:
 			maxValue= None
 	if maxValue is None or not maxValue >= startValue :  # max value can NOT be less than the startValue
-		maxValue= float("inf")
+		maxValue= __inf
 		
 	if dataLength < 1 :
 		return None
@@ -219,64 +221,73 @@ def interpolateData(dataArray, startValue= None, maxValue= 0xFFFF):  # operates 
 	c2= 0
 	lastJump= 0
 	nextJump= 0
+	futrJump= _dataLength
 	lastValue= None
-	nextValue= None
+	currValue= None
+	futrValue= maxValue
 	lastFactor= 0
 	nextFactor= 0
 	started=  dataArray[0] <= startValue
-	dataArray[0]=  nextValue=  currValue= startValue  # makes sure the data starts at startValue
-	for currIndex in range(0, _dataLength) :
+	dataArray[0]= nextValue= startValue  # makes sure the data starts at startValue
+
+	# Find the index of the next jump
+	for i in range(0, _dataLength):
+		v= dataArray[i]
+		if not started :  # checks if the function has actually reached the startValue yet
+			started=  v <= startValue
+		elif v > nextValue :  # ignores any areas where the data decreases (at least for now)
+			futrJump= i
+			futrValue= v
+			break
+
+	for currIndex in range(0, dataLength) :
 	
-		if nextJump is not None  and  currIndex >= nextJump :
-			lastJump= nextJump
-			lastValue= currValue
-			currValue= nextValue
-			if currValue < maxValue :
-				for i in range(currIndex+1, _dataLength):
-					v= dataArray[i]
-					if not started :  # checks if the function has actually reached the startValue yet
-						started=  v <= startValue
-					elif v > currValue :  # ignores any areas where the data decreases (at least for now)
-						nextJump= i
-						nextValue= v
-						break
-			if lastJump==nextJump :
-				nextJump= None
-				nextValue= maxValue
-				
+		if currIndex >= nextJump :
 			c0= c1
 			c1= c2
-			if nextValue >= maxValue :
-				c2= dataLength
-			elif nextJump==currIndex+1 :  # if there aren't any contiguous values yet 
-				c2= nextJump				# save some time & energy
-			else:
-				jumpWeight= 1 - float(c1)/dataLength  # the weight-factor or the priority given to lastJump over nextJump 
-				c2= int( ( lastJump + nextJump*jumpWeight ) / ( 1 + jumpWeight ) + 0.5 )  # rounds c2 to the nearest integer
-				if c2==lastJump :
-					c2+= 1  # c2 should be at least one integer away from lastJump
-				
 			lastFactor= nextFactor
-			if c2>=dataLength :
-				nextFactor= 0.0
-				if currValue < maxValue :
-					continue
-			else:
+			lastJump= nextJump
+			nextJump= futrJump
+			lastValue= currValue
+			currValue= nextValue
+			nextValue= futrValue
+			if nextValue < maxValue :
+
+				for i in range(nextJump+1, _dataLength):
+					v= dataArray[i]
+					if v > nextValue :  # ignores any areas where the data decreases (at least for now)
+						futrJump= i
+						futrValue= v
+						break
+
+				if futrJump == nextJump :
+					futrJump= _dataLength
+					futrValue= maxValue
+
+				#jumpWeight= float(c1)/dataLength
+				#jumpWeight= 0.5 + jumpWeight * jumpWeight / 2   # the weight-factor or the priority given to futrJump over nextJump
+				#c2= int( nextJump * ( 1 - jumpWeight ) + futrJump * jumpWeight + 0.5 )  # rounds c2 to the nearest integer
+				c2= ( nextJump + futrJump ) / 2  # fit curve to middle of each step
 				nextFactor= float(dataLength-c2)/(c2-c1)*(nextValue-currValue)
-				continue  # do NOT modify the value at nextJump, unless we are near the end of the array
+
+			else:
+				c2= dataLength
+				nextFactor= 0.0
+				nextJump= _dataLength
 		
-		
-		if lastFactor==0 :  # near beginning of array
+		if lastFactor == 0 :  # near beginning of array
 			dataArray[currIndex]= currValue + (currIndex-c1)/(dataLength-currIndex)*nextFactor
-		elif nextFactor :
+		elif nextFactor > 0 :
 			dataArray[currIndex]= \
-				(
-					( lastValue + (currIndex-c0)/(dataLength-currIndex)*lastFactor )*(nextJump-currIndex)
-				  +
-			    	( currValue + (currIndex-c1)/(dataLength-currIndex)*nextFactor )*(currIndex-lastJump)
+			    (
+			        ( lastValue + (currIndex-c0)/(dataLength-currIndex)*lastFactor ) * (nextJump-currIndex)
+			         +
+			        ( currValue + (currIndex-c1)/(dataLength-currIndex)*nextFactor ) * (currIndex-lastJump)
 			    ) / (nextJump-lastJump)
 		else:  # near end of array
 			dataArray[currIndex]= lastValue + (currIndex-c0)/(dataLength-currIndex)*lastFactor
 	
+	if dataLength > 0 :
+		dataArray[dataLength]= maxValue
 			
 	return dataArray

@@ -1,4 +1,4 @@
-# XFocus
+# XFocus [![Python CI](https://github.com/NedAnd1/XFocus/actions/workflows/python-package.yml/badge.svg)](https://github.com/NedAnd1/XFocus/actions/workflows/python-package.yml)
 Custom Auto-Focus for Canon DSLRs with [Magic Lantern](https://magiclantern.fm/) and Raspberry PI.
 
 ## Purpose
